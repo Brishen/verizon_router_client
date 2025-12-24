@@ -1,14 +1,49 @@
 from __future__ import annotations
 
+import ast
 import hashlib
+import ipaddress
+import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
-import ast
-import json
+from urllib.parse import urlparse
 
 import requests
+import urllib3
 
+_DEFAULT_CA_CERT = (
+    Path(__file__).resolve().parent / "cert" / "Verizon Fios Root CA.pem"
+)
+
+
+def _is_ip_host(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+class HostHeaderSSLAdapter(requests.adapters.HTTPAdapter):
+    def __init__(self, tls_hostname: str, **kwargs: Any) -> None:
+        self._tls_hostname = tls_hostname
+        super().__init__(**kwargs)
+
+    def init_poolmanager(
+        self, connections: int, maxsize: int, block: bool = False, **pool_kwargs: Any
+    ) -> None:
+        pool_kwargs["assert_hostname"] = self._tls_hostname
+        pool_kwargs["server_hostname"] = self._tls_hostname
+        self.poolmanager = urllib3.PoolManager(
+            num_pools=connections, maxsize=maxsize, block=block, **pool_kwargs
+        )
+
+    def proxy_manager_for(self, proxy: str, **proxy_kwargs: Any) -> urllib3.ProxyManager:
+        proxy_kwargs["assert_hostname"] = self._tls_hostname
+        proxy_kwargs["server_hostname"] = self._tls_hostname
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
 
 def _js_8bit_bytes(s: str) -> bytes:
     # Matches the JS code path that effectively uses charCodeAt(...) & 0xFF.
@@ -36,14 +71,14 @@ def luci_password(password: str, luci_token: str) -> str:
     return hashlib.sha512(material).hexdigest()
 
 
-_HEX32 = re.compile(r"^[0-9a-fA-F]{32}$")
-
 _ADD_CFG_RE = re.compile(
     r'addCfg\("(?P<key>[^"]+)",\s*"(?P<enc>[^"]*)",\s*"(?P<val>[^"]*)"\);'
 )
 _KEY_WITH_INDEX_RE = re.compile(r"^(?P<prefix>.*?)(?P<idx>\d+)$")
 
-_ADD_ROD_RE = re.compile(r'addROD\("(?P<key>[^"]+)",\s*(?P<val>.*?)\);\s*')
+_ADD_ROD_RE = re.compile(
+    r'addROD\("(?P<key>[^"]+)",\s*(?P<val>.*?)\);\s*', re.DOTALL
+)
 
 
 def _strip_wrapping_quotes(s: str) -> str:
@@ -62,6 +97,7 @@ def _parse_js_literal(s: str) -> Any:
     v = re.sub(r"\bnull\b", "None", v)
     v = re.sub(r"\btrue\b", "True", v)
     v = re.sub(r"\bfalse\b", "False", v)
+    v = v.replace(r"\/", "/")
 
     try:
         parsed = ast.literal_eval(v)
@@ -74,31 +110,6 @@ def _parse_js_literal(s: str) -> Any:
     return parsed
 
 
-def _find_hex32(obj: Any) -> str | None:
-    """
-    Recursively search JSON-ish structures for a 32-hex token.
-    This is a heuristic because Verizon firmware variants differ in field names.
-    """
-    if isinstance(obj, str) and _HEX32.fullmatch(obj):
-        return obj
-    if isinstance(obj, dict):
-        # Prefer obvious names if present
-        for k in ("luci_token", "token", "loginToken", "login_token"):
-            v = obj.get(k)
-            if isinstance(v, str) and _HEX32.fullmatch(v):
-                return v
-        for v in obj.values():
-            found = _find_hex32(v)
-            if found:
-                return found
-    if isinstance(obj, list):
-        for v in obj:
-            found = _find_hex32(v)
-            if found:
-                return found
-    return None
-
-
 @dataclass(frozen=True, slots=True)
 class CfgEntry:
     key: str
@@ -108,32 +119,29 @@ class CfgEntry:
 
 @dataclass(slots=True)
 class VerizonRouterClient:
-    """
-    Example base_url: "https://192.168.1.1:10443"
-    (matches your fetch() and implies a self-signed cert in many cases)
-    """
-
-    base_url: str = "https://192.168.1.1:10443"
-    verify_tls: bool = False
+    base_url: str = "https://192.168.1.1"
+    verify_tls: bool | str = str(_DEFAULT_CA_CERT)
+    tls_hostname: str | None = None
     timeout_s: float = 10.0
-    session: requests.Session = None
+    session: requests.Session | None = None
 
     def __post_init__(self) -> None:
-        self.session = requests.Session()
+        if self.session is None:
+            self.session = requests.Session()
+        if self.tls_hostname is None:
+            host = urlparse(self.base_url).hostname
+            if host and _is_ip_host(host):
+                self.tls_hostname = "mynetworksettings.com"
+        if self.tls_hostname:
+            self.session.mount("https://", HostHeaderSSLAdapter(self.tls_hostname))
 
-    def login_status(self) -> dict[str, Any]:
-        url = f"{self.base_url.rstrip('/')}/loginStatus.cgi"
-        r = self.session.get(
-            url,
-            headers={"Accept": "application/json, text/plain, */*"},
-            timeout=self.timeout_s,
-            verify=self.verify_tls,
-        )
-        r.raise_for_status()
-        data = r.json()
-        if not isinstance(data, dict):
-            raise RuntimeError(f"Unexpected loginStatus.cgi JSON type: {type(data)}")
-        return data
+    def _request_headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        headers = {"Referer": f"{self.base_url.rstrip('/')}/"}
+        if self.tls_hostname:
+            headers["Host"] = self.tls_hostname
+        if extra:
+            headers.update(extra)
+        return headers
 
     def get_login_token(self) -> str:
         data = self.login_status()
@@ -166,35 +174,19 @@ class VerizonRouterClient:
             data=payload,  # form-encoded
             timeout=self.timeout_s,
             verify=self.verify_tls,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            headers=self._request_headers(
+                {"Content-Type": "application/x-www-form-urlencoded"}
+            ),
         )
         return r
-
-    def _get_text(self, path: str) -> str:
-        url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
-        r = self.session.get(
-            url,
-            timeout=self.timeout_s,
-            verify=self.verify_tls,
-            headers={
-                "Accept": "application/json, text/plain, */*",
-                "Referer": f"{self.base_url.rstrip('/')}/",
-            },
-        )
-        r.raise_for_status()
-        return r.text
 
     def get_dns_cfg(self) -> dict[str, str]:
         """
         Fetch /cgi/cgi_dns_server.js and return plaintext values keyed by addCfg key.
         """
-        js = self._get_text("/cgi/cgi_dns_server.js")
-
-        cfg: dict[str, str] = {}
-        for m in _ADD_CFG_RE.finditer(js):
-            key = m.group("key")
-            val = m.group("val")
-            cfg[key] = val
+        text = self._get("/cgi/cgi_dns_server.js").text
+        cfg_entries = self._parse_addcfg(text)
+        cfg = {key: entry.val for key, entry in cfg_entries.items()}
         if not cfg:
             # Often indicates you were served a login page / redirect JS instead of cfg JS.
             raise RuntimeError(
@@ -217,7 +209,7 @@ class VerizonRouterClient:
     def get_dns_entries_v4(self) -> list[dict[str, Any]]:
         """
         Returns rows like:
-          {"idx": 0, "name": "truenas-ssd", "ip": "192.168.1.195"}
+          {"idx": 0, "name": "example-host", "ip": "192.168.1.2"}
         Only returns indices where either name or ip is non-empty.
         """
         cfg = self.get_dns_cfg()
@@ -253,7 +245,7 @@ class VerizonRouterClient:
             self._url(path),
             timeout=self.timeout_s,
             verify=self.verify_tls,
-            headers={"Referer": f"{self.base_url.rstrip('/')}/"},
+            headers=self._request_headers(),
         )
         r.raise_for_status()
         return r
@@ -295,7 +287,6 @@ class VerizonRouterClient:
 
     def get_wan_dns_servers(self) -> list[str]:
         _rod, cfg = self.fetch_status()
-        # In your sample, "wan_ip4_dns" is a space-separated string of servers.
         v = cfg.get("wan_ip4_dns")
         if not v or not v.val.strip():
             return []
@@ -314,19 +305,86 @@ class VerizonRouterClient:
             raise RuntimeError("No addROD/addCfg entries found in /cgi/cgi_status.js")
         return rod, cfg
 
+    def fetch_port_forwarding(self) -> dict[str, Any]:
+        """
+        GET /cgi/cgi_firewall_port_forward.js and parse addROD(...) payloads.
+        """
+        text = self._get("/cgi/cgi_firewall_port_forward.js").text
+        rod = self._parse_addrod(text)
+        if not rod:
+            raise RuntimeError(
+                "No addROD() entries found in /cgi/cgi_firewall_port_forward.js"
+            )
+        return rod
+
+    def get_port_forwarding_settings(self) -> dict[str, Any]:
+        """
+        Returns a normalized view of the port forwarding payload, with null entries removed.
+        """
+        rod = self.fetch_port_forwarding()
+
+        portforwardings = rod.get("portforwardings")
+        if not isinstance(portforwardings, dict):
+            raise RuntimeError(
+                f"Unexpected portforwardings payload: {type(portforwardings)}"
+            )
+        entries = portforwardings.get("portforwardings")
+        if not isinstance(entries, list):
+            raise RuntimeError(
+                f"Unexpected portforwardings list: {type(entries)}"
+            )
+
+        upnp = rod.get("upnpportforwardings")
+        if upnp is None:
+            upnp_entries: list[Any] = []
+        elif isinstance(upnp, list):
+            upnp_entries = [entry for entry in upnp if entry is not None]
+        else:
+            raise RuntimeError(
+                f"Unexpected upnpportforwardings payload: {type(upnp)}"
+            )
+
+        readonly = rod.get("readonly_portforwardings")
+        if readonly is None:
+            readonly_entries: list[Any] = []
+        elif isinstance(readonly, list):
+            readonly_entries = [entry for entry in readonly if entry is not None]
+        else:
+            raise RuntimeError(
+                f"Unexpected readonly_portforwardings payload: {type(readonly)}"
+            )
+
+        return {
+            "portforwardings": entries,
+            "upnpportforwardings": upnp_entries,
+            "readonly_portforwardings": readonly_entries,
+            "portrules": rod.get("portrules"),
+            "schedulerules": rod.get("schedulerules"),
+            "reservePort": rod.get("reservePort"),
+        }
+
     def _post_form(self, path: str, data: dict[str, str]) -> requests.Response:
         r = self.session.post(
             self._url(path),
             data=data,
             timeout=self.timeout_s,
             verify=self.verify_tls,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": f"{self.base_url.rstrip('/')}/",
-            },
+            headers=self._request_headers(
+                {"Content-Type": "application/x-www-form-urlencoded"}
+            ),
         )
         r.raise_for_status()
         return r
+
+    def _post_db(self, payload: dict[str, Any], *, token: str | None = None) -> Any:
+        if token is None:
+            token = self.get_apply_token()
+        data = {"data": json.dumps(payload), "token": token}
+        r = self._post_form("/db.cgi", data)
+        try:
+            return r.json()
+        except ValueError:
+            return r.text
 
     # ---- tokens / auth ----
     def login_status(self) -> dict[str, Any]:
@@ -347,6 +405,154 @@ class VerizonRouterClient:
             "After login, check loginStatus.cgi again; if still empty, the token is likely loaded from another endpoint/page."
         )
 
+    def add_port_forward(
+        self,
+        *,
+        name: str,
+        private_ip: str,
+        forward_port: int | str,
+        dest_port: int | str,
+        enable: bool = True,
+        schedule_rule_id: int | str = 0,
+        port_type: int = 8,
+        source_type: int = 0,
+        source_port: str = "",
+        dest_type: int = 1,
+        token: str | None = None,
+    ) -> int:
+        """
+        Create a port forwarding rule via /db.cgi and return the new rule id.
+        """
+        payload = {
+            "type": "edit",
+            "to": "forwardrule",
+            "body": [
+                {
+                    "type": "create",
+                    "enable": "1" if enable else "0",
+                    "name": name,
+                    "privateIP": private_ip,
+                    "forward_port": str(forward_port),
+                    "schedule_rule_id": str(schedule_rule_id),
+                    "ports": [
+                        {
+                            "type": port_type,
+                            "source_type": source_type,
+                            "source_port": source_port,
+                            "dest_type": dest_type,
+                            "dest_port": str(dest_port),
+                        }
+                    ],
+                }
+            ],
+        }
+        response = self._post_db(payload, token=token)
+        rule_id = self._extract_rule_id_from_response(response)
+        if rule_id is not None:
+            return rule_id
+        rule_id = self._lookup_port_forward_id(
+            name=name,
+            private_ip=private_ip,
+            forward_port=forward_port,
+            dest_port=dest_port,
+        )
+        if rule_id is None:
+            raise RuntimeError(
+                f"Port forward created but rule id not found. Response: {response!r}"
+            )
+        return rule_id
+
+    def remove_port_forward(
+        self,
+        *,
+        rule_id: int | str,
+        token: str | None = None,
+    ) -> Any:
+        """
+        Remove a port forwarding rule via /db.cgi.
+        """
+        payload = {
+            "type": "edit",
+            "to": "forwardrule",
+            "body": [{"type": "delete", "id": str(rule_id)}],
+        }
+        return self._post_db(payload, token=token)
+
+    @staticmethod
+    def _extract_rule_id_from_response(response: Any) -> int | None:
+        if isinstance(response, dict):
+            for key in ("id", "rule_id", "forward_rule_id"):
+                value = response.get(key)
+                if isinstance(value, int):
+                    return value
+                if isinstance(value, str) and value.isdigit():
+                    return int(value)
+            body = response.get("body")
+            if isinstance(body, list) and body:
+                first = body[0]
+                if isinstance(first, dict):
+                    value = first.get("id")
+                    if isinstance(value, int):
+                        return value
+                    if isinstance(value, str) and value.isdigit():
+                        return int(value)
+        return None
+
+    def _lookup_port_forward_id(
+        self,
+        *,
+        name: str,
+        private_ip: str,
+        forward_port: int | str,
+        dest_port: int | str,
+    ) -> int | None:
+        settings = self.get_port_forwarding_settings()
+        entries = settings.get("portforwardings")
+        if not isinstance(entries, list):
+            return None
+
+        port_rule_ports: dict[int, set[str]] = {}
+        portrules = settings.get("portrules")
+        if isinstance(portrules, dict):
+            rules = portrules.get("portrules")
+            if isinstance(rules, list):
+                for rule in rules:
+                    if not isinstance(rule, dict):
+                        continue
+                    rule_id = rule.get("id")
+                    ports = rule.get("ports")
+                    if not isinstance(rule_id, int) or not isinstance(ports, list):
+                        continue
+                    dest_ports = {
+                        str(port.get("dest_port"))
+                        for port in ports
+                        if isinstance(port, dict) and "dest_port" in port
+                    }
+                    port_rule_ports[rule_id] = dest_ports
+
+        matches: list[int] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("name") != name:
+                continue
+            if entry.get("privateIP") != private_ip:
+                continue
+            if str(entry.get("forward_port")) != str(forward_port):
+                continue
+            port_rule_id = entry.get("port_rule_id")
+            if isinstance(port_rule_id, int):
+                dest_ports = port_rule_ports.get(port_rule_id)
+                if dest_ports and str(dest_port) not in dest_ports:
+                    continue
+            entry_id = entry.get("id")
+            if isinstance(entry_id, int):
+                matches.append(entry_id)
+
+        if not matches:
+            return None
+        return max(matches)
+
     # ---- cfg parsing ----
     def fetch_dns_cfg(self) -> dict[str, CfgEntry]:
         """
@@ -354,10 +560,7 @@ class VerizonRouterClient:
         logical key -> (obfuscated field name, plaintext value)
         """
         text = self._get("/cgi/cgi_dns_server.js").text
-        cfg: dict[str, CfgEntry] = {}
-        for m in _ADD_CFG_RE.finditer(text):
-            key = m.group("key")
-            cfg[key] = CfgEntry(key=key, enc_name=m.group("enc"), val=m.group("val"))
+        cfg = self._parse_addcfg(text)
         if not cfg:
             raise RuntimeError("No addCfg() entries found in /cgi/cgi_dns_server.js")
         return cfg
@@ -556,10 +759,7 @@ class VerizonRouterClient:
         already having a valid 'sysauth' cookie.
         """
         url = self._url("/cgi/cgi_owl.js")
-        headers = {
-            "Accept": "application/json, text/plain, */*",
-            "Referer": f"{self.base_url.rstrip('/')}/",
-        }
+        headers = self._request_headers({"Accept": "application/json, text/plain, */*"})
         cookies = {"sysauth": sysauth_cookie_value} if sysauth_cookie_value else None
 
         r = self.session.get(

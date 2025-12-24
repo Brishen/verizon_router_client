@@ -1,0 +1,17 @@
+[project]
+name = "verizon-router-client"
+version = "0.1.0"
+description = "Python client for Verizon Fios router APIs (CR1000A web UI endpoints)."
+readme = "README.md"
+authors = [
+    { name = "Brishen Hawkins", email = "brishen.hawkins@gmail.com" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.28.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.15,<0.9.0"]
+build-backend = "uv_build"
