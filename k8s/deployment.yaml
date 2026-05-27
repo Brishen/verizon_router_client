@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verizon-router-operator
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: verizon-router-operator
+  template:
+    metadata:
+      labels:
+        app: verizon-router-operator
+    spec:
+      serviceAccountName: verizon-router-operator
+      containers:
+      - name: operator
+        image: verizon-router-operator:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: ROUTER_BASE_URL
+          value: "https://192.168.1.1"
+        - name: ROUTER_USERNAME
+          value: "admin"
+        - name: ROUTER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: verizon-router-secret
+              key: password

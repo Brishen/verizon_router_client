@@ -118,6 +118,80 @@ If your router uses different TLS settings, override `verify_tls` or `tls_hostna
 - Python: 3.9+
 - Runtime dependency: `requests`
 
+## Kubernetes Operator
+
+The `verizon-router-client` can also be deployed as a Kubernetes operator using [kopf](https://kopf.readthedocs.io/).
+The operator manages custom resources for DNS and Port Forwarding.
+
+### Setup
+
+First, install the package with operator dependencies:
+
+```bash
+pip install -e ".[operator]"
+```
+
+Or build and use the provided Docker image:
+
+```bash
+docker build -t verizon-router-operator:latest .
+```
+
+### Apply CRDs & RBAC
+
+Apply the Custom Resource Definitions (CRDs) and Role-Based Access Control (RBAC):
+
+```bash
+kubectl apply -f k8s/crd-fiosdnsrecord.yaml
+kubectl apply -f k8s/crd-fiosportforward.yaml
+kubectl apply -f k8s/rbac.yaml
+```
+
+### Configure Authentication
+
+Create a secret with your router password:
+
+```bash
+kubectl create secret generic verizon-router-secret \
+  --from-literal=password='YOUR_ROUTER_PASSWORD'
+```
+
+Deploy the operator:
+
+```bash
+kubectl apply -f k8s/deployment.yaml
+```
+
+### Custom Resources
+
+You can now manage your router via standard Kubernetes manifests.
+
+**Add a DNS Record:**
+
+```yaml
+apiVersion: network.verizon.com/v1alpha1
+kind: FiosDnsRecord
+metadata:
+  name: nas-entry
+spec:
+  hostname: nas
+  ip: 192.168.1.10
+```
+
+**Add a Port Forwarding Rule:**
+
+```yaml
+apiVersion: network.verizon.com/v1alpha1
+kind: FiosPortForward
+metadata:
+  name: ssh-forward
+spec:
+  name: ssh
+  private_ip: 192.168.1.20
+  forward_port: 22
+  dest_port: 22
+```
+
 ## Disclaimer
 
 This project is not affiliated with Verizon. Use at your own risk.
