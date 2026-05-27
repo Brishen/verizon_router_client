@@ -1,0 +1,42 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: fiosdnsrecords.network.verizon.com
+spec:
+  group: network.verizon.com
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - hostname
+                - ip
+              properties:
+                hostname:
+                  type: string
+                  description: The hostname for the DNS record
+                ip:
+                  type: string
+                  description: The IPv4 address for the DNS record
+      additionalPrinterColumns:
+      - name: Hostname
+        type: string
+        description: The hostname
+        jsonPath: .spec.hostname
+      - name: IP
+        type: string
+        description: The IP Address
+        jsonPath: .spec.ip
+  scope: Namespaced
+  names:
+    plural: fiosdnsrecords
+    singular: fiosdnsrecord
+    kind: FiosDnsRecord
+    shortNames:
+      - fdr
