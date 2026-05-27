@@ -123,6 +123,19 @@ If your router uses different TLS settings, override `verify_tls` or `tls_hostna
 The `verizon-router-client` can also be deployed as a Kubernetes operator using [kopf](https://kopf.readthedocs.io/).
 The operator manages custom resources for DNS and Port Forwarding.
 
+### Helm
+
+You can easily install the operator using the provided Helm chart.
+
+```bash
+# If you don't have an existing secret, you can pass the password directly
+helm install verizon-router-operator ./charts/verizon-router-operator \
+  --set router.password='YOUR_ROUTER_PASSWORD'
+
+# Or, if you've created a secret named `verizon-router-secret` with the `password` key:
+helm install verizon-router-operator ./charts/verizon-router-operator
+```
+
 ### Setup
 
 First, install the package with operator dependencies:
