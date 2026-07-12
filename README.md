@@ -41,6 +41,8 @@ VZ_ROUTER_PASSWORD=your-admin-password
 # VZ_ROUTER_VERIFY_TLS=false          # or a path to a CA bundle
 # VZ_ROUTER_TLS_HOSTNAME=mynetworksettings.com
 # VZ_ROUTER_TIMEOUT_S=10.0
+# VZ_ROUTER_ENABLE_METRICS=true
+# VZ_ROUTER_METRICS_PORT=9100
 ```
 
 With that in place, `connect()` builds a client and logs in:
@@ -190,6 +192,27 @@ vzrouter forward list
 vzrouter forward add --name ssh --private-ip 192.168.1.20 \
   --forward-port 22 --dest-port 22
 vzrouter forward remove 12345
+```
+
+## Metrics Export (Prometheus)
+
+You can run a Prometheus-compatible metrics server to monitor your router's performance, connected devices, traffic stats, and signal qualities via Grafana:
+
+```bash
+vzrouter metrics --address 0.0.0.0 --port 9100
+```
+
+To use a Prometheus Pushgateway instead:
+```bash
+vzrouter metrics --pushgateway-url http://localhost:9091 --push-interval 30.0
+```
+
+Sample Prometheus configuration (`prometheus.yml`):
+```yaml
+scrape_configs:
+  - job_name: "verizon_router"
+    static_configs:
+      - targets: ["localhost:9100"]
 ```
 
 ## TLS notes

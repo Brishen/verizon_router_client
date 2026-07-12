@@ -36,6 +36,14 @@ class RouterSettings(BaseSettings):
     tls_hostname: str | None = None
     timeout_s: float = 10.0
 
+    # Metrics configuration
+    enable_metrics: bool = False
+    metrics_address: str = "0.0.0.0"
+    metrics_port: int = 9100
+    pushgateway_url: str | None = None
+    push_interval: float = 30.0
+    metric_prefix: str = "verizon_router"
+
     @field_validator("verify_tls", mode="before")
     @classmethod
     def _coerce_verify_tls(cls, v: object) -> object:
