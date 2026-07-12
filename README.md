@@ -203,6 +203,39 @@ If your router uses different TLS settings, override `verify_tls` or `tls_hostna
 - Python: 3.10+
 - Runtime dependencies: `requests`, `pydantic-settings`, `click`
 
+## Testing
+
+Run the suite with pytest:
+
+```bash
+uv run pytest
+```
+
+Unit tests (parsing, auth hashing, settings, CLI) never touch the network.
+Integration tests run against a backend selected with `--router`:
+
+```bash
+uv run pytest --router=mock   # in-process mock router service
+uv run pytest --router=real   # your real router, credentials from .env
+uv run pytest                 # auto (default): real if .env has a password,
+                              # mock otherwise
+```
+
+- **Mock** (`tests/mock_router.py`): an in-process HTTP service emulating the
+  CR1000A — hashed-credential login with a `sysauth` cookie, auth-gated
+  `cgi/*.js` endpoints, and stateful DNS / port-forwarding mutations. All
+  fixture data uses RFC documentation values.
+- **Real**: reads credentials from the project `.env` (`--router=real` skips
+  if none). Mutating tests create uniquely named entries (`pytest-vzr-*`)
+  and remove them afterwards. Tests that need deterministic state or are
+  unsafe against real hardware (e.g. repeated failed logins) always run
+  against the mock, whichever backend is selected.
+
+Note: the router throttles rapid logins, so real-mode tests share a single
+login for the whole session. If the router is still throttling from recent
+attempts, the real-backend tests skip with an explanatory message — wait a
+few minutes and rerun.
+
 ## Kubernetes Operator
 
 The `verizon-router-client` can also be deployed as a Kubernetes operator using [kopf](https://kopf.readthedocs.io/).
