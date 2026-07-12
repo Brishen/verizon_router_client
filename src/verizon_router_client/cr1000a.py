@@ -125,6 +125,24 @@ class VerizonRouterClient:
     timeout_s: float = 10.0
     session: requests.Session | None = None
 
+    @classmethod
+    def from_settings(cls, settings: Any = None) -> VerizonRouterClient:
+        """
+        Build a client from RouterSettings (loaded from env / .env when omitted).
+        """
+        from .config import RouterSettings
+
+        if settings is None:
+            settings = RouterSettings()
+        kwargs: dict[str, Any] = {
+            "base_url": settings.base_url,
+            "tls_hostname": settings.tls_hostname,
+            "timeout_s": settings.timeout_s,
+        }
+        if settings.verify_tls is not None:
+            kwargs["verify_tls"] = settings.verify_tls
+        return cls(**kwargs)
+
     def __post_init__(self) -> None:
         if self.session is None:
             self.session = requests.Session()
@@ -362,6 +380,63 @@ class VerizonRouterClient:
             "schedulerules": rod.get("schedulerules"),
             "reservePort": rod.get("reservePort"),
         }
+
+    def fetch_bandwidth(self) -> dict[str, Any]:
+        """
+        GET /cgi/cgi_bandwith.js (endpoint name is misspelled in firmware) and
+        parse addROD(...) payloads: get_history_rates, known_device_list,
+        hosts_trafstat, fsam_update.
+        """
+        text = self._get("/cgi/cgi_bandwith.js").text
+        rod = self._parse_addrod(text)
+        if not rod:
+            raise RuntimeError("No addROD() entries found in /cgi/cgi_bandwith.js")
+        return rod
+
+    def get_bandwidth_history_rates(self) -> list[list[int]]:
+        """
+        Returns the get_history_rates series as lists of ints (firmware sends
+        them as strings).
+        """
+        rod = self.fetch_bandwidth()
+        rates = rod.get("get_history_rates")
+        if not isinstance(rates, list):
+            raise RuntimeError(f"Unexpected get_history_rates payload: {type(rates)}")
+        out: list[list[int]] = []
+        for series in rates:
+            if not isinstance(series, list):
+                raise RuntimeError(f"Unexpected get_history_rates series: {series!r}")
+            out.append([int(v) for v in series])
+        return out
+
+    def get_host_traffic_stats(self) -> dict[int, dict[str, dict[str, int]]]:
+        """
+        Returns hosts_trafstat keyed by period seconds (3600, 43200, 86400,
+        604800, 2592000), then by MAC address:
+          {3600: {"aa:bb:...": {"packets_tx": 126, "bytes_tx": 20486,
+                                "packets_rx": 35, "bytes_rx": 4561}, ...}, ...}
+        """
+        rod = self.fetch_bandwidth()
+        trafstat = rod.get("hosts_trafstat")
+        if not isinstance(trafstat, dict):
+            raise RuntimeError(f"Unexpected hosts_trafstat payload: {type(trafstat)}")
+
+        out: dict[int, dict[str, dict[str, int]]] = {}
+        for period, hosts in trafstat.items():
+            if not isinstance(hosts, dict):
+                raise RuntimeError(f"Unexpected hosts_trafstat period entry: {hosts!r}")
+            period_stats: dict[str, dict[str, int]] = {}
+            for mac, stats in hosts.items():
+                if not isinstance(stats, dict):
+                    raise RuntimeError(f"Unexpected hosts_trafstat host entry: {stats!r}")
+                period_stats[mac] = {
+                    "packets_tx": int(stats.get("packets_tx", 0)),
+                    "bytes_tx": int(stats.get("bytes_tx", 0)),
+                    "packets_rx": int(stats.get("packets_rx", 0)),
+                    "bytes_rx": int(stats.get("bytes_rx", 0)),
+                }
+            out[int(period)] = period_stats
+        return out
 
     def _post_form(self, path: str, data: dict[str, str]) -> requests.Response:
         r = self.session.post(
