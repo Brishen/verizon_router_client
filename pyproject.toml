@@ -10,7 +10,6 @@ license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.1.8",
-    "prometheus-client>=0.25.0",
     "pydantic-settings>=2.11.0",
     "pytest>=8.4.2",
     "requests>=2.34.2",
@@ -22,6 +21,7 @@ Issues = "https://github.com/Brishen/verizon_router_client/issues"
 
 [project.optional-dependencies]
 operator = ["kopf", "kubernetes"]
+metrics = ["prometheus-client>=0.25.0"]
 
 [project.scripts]
 vzrouter = "verizon_router_client.cli:cli"

@@ -1,4 +1,5 @@
 import pytest
+pytest.importorskip("prometheus_client")
 from prometheus_client import REGISTRY
 from verizon_router_client.metrics import VerizonRouterCollector
 from verizon_router_client.config import RouterSettings

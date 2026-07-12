@@ -258,7 +258,13 @@ def metrics(
     settings.enable_metrics = True
 
     client = _client(ctx)
-    from .metrics import start_metrics_server
+    try:
+        from .metrics import start_metrics_server
+    except ImportError:
+        raise click.ClickException(
+            "The 'metrics' optional dependency is not installed. "
+            "Install it with: pip install verizon-router-client[metrics]"
+        )
     start_metrics_server(client, settings)
 
 
