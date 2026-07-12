@@ -21,6 +21,7 @@ Issues = "https://github.com/Brishen/verizon_router_client/issues"
 
 [project.optional-dependencies]
 operator = ["kopf", "kubernetes"]
+metrics = ["prometheus-client>=0.25.0"]
 
 [project.scripts]
 vzrouter = "verizon_router_client.cli:cli"

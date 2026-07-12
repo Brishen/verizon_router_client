@@ -230,6 +230,44 @@ def forward_remove(ctx: click.Context, rule_id: str) -> None:
     click.echo(f"Removed rule id {rule_id}")
 
 
+@cli.command()
+@click.option("--address", default=None, help="Listen address for the metrics server.")
+@click.option("--port", type=int, default=None, help="Listen port for the metrics server.")
+@click.option("--pushgateway-url", default=None, help="Prometheus Pushgateway URL.")
+@click.option("--push-interval", type=float, default=None, help="Push interval in seconds.")
+@click.pass_context
+def metrics(
+    ctx: click.Context,
+    address: str | None,
+    port: int | None,
+    pushgateway_url: str | None,
+    push_interval: float | None,
+) -> None:
+    """Start the Prometheus metrics exporter or push loop."""
+    settings: RouterSettings = ctx.obj
+    if address is not None:
+        settings.metrics_address = address
+    if port is not None:
+        settings.metrics_port = port
+    if pushgateway_url is not None:
+        settings.pushgateway_url = pushgateway_url
+    if push_interval is not None:
+        settings.push_interval = push_interval
+
+    # To run the metrics server, we implicitly enable metrics if this command is run.
+    settings.enable_metrics = True
+
+    client = _client(ctx)
+    try:
+        from .metrics import start_metrics_server
+    except ImportError:
+        raise click.ClickException(
+            "The 'metrics' optional dependency is not installed. "
+            "Install it with: pip install verizon-router-client[metrics]"
+        )
+    start_metrics_server(client, settings)
+
+
 def main() -> None:
     cli()
 
