@@ -15,6 +15,10 @@ dependencies = [
     "requests>=2.34.2",
 ]
 
+[project.urls]
+Repository = "https://github.com/Brishen/verizon_router_client"
+Issues = "https://github.com/Brishen/verizon_router_client/issues"
+
 [project.optional-dependencies]
 operator = ["kopf", "kubernetes"]
 
