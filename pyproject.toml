@@ -21,6 +21,9 @@ operator = ["kopf", "kubernetes"]
 [project.scripts]
 vzrouter = "verizon_router_client.cli:cli"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
 requires = ["uv_build>=0.8.15,<0.9.0"]
 build-backend = "uv_build"
