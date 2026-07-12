@@ -9,6 +9,9 @@ Python client for Verizon Fios router APIs (focused on the CR1000A web UI endpoi
 - Read/write local DNS entries.
 - Read/add/remove port forwarding rules.
 - Parse known device lists.
+- Bandwidth history and per-host traffic statistics.
+- Settings from environment variables / `.env` (pydantic-settings).
+- `vzrouter` command-line interface (click).
 
 ## Install
 
@@ -23,6 +26,34 @@ Or with uv:
 ```bash
 uv pip install -e .
 ```
+
+## Configuration
+
+Settings are read from `VZ_ROUTER_*` environment variables and/or a `.env`
+file in the working directory (environment variables win). Copy
+`.env.example` to `.env` and fill in your values:
+
+```dotenv
+VZ_ROUTER_BASE_URL=https://192.168.1.1
+VZ_ROUTER_USERNAME=admin
+VZ_ROUTER_PASSWORD=your-admin-password
+# Optional:
+# VZ_ROUTER_VERIFY_TLS=false          # or a path to a CA bundle
+# VZ_ROUTER_TLS_HOSTNAME=mynetworksettings.com
+# VZ_ROUTER_TIMEOUT_S=10.0
+```
+
+With that in place, `connect()` builds a client and logs in:
+
+```python
+from verizon_router_client import connect
+
+client = connect()
+```
+
+You can also construct settings explicitly with
+`RouterSettings(base_url=..., password=...)` and pass them to `connect()` or
+`VerizonRouterClient.from_settings()`.
 
 ## Quickstart
 
@@ -107,6 +138,60 @@ client = VerizonRouterClient(
 devices = client.fetch_known_devices(sysauth_cookie_value="...")
 ```
 
+## Bandwidth and traffic statistics
+
+Parses `/cgi/cgi_bandwith.js` (the endpoint name is misspelled in firmware):
+
+```python
+from verizon_router_client import connect
+
+client = connect()
+
+# Bandwidth history rate series (lists of ints, as reported by the router).
+history = client.get_bandwidth_history_rates()
+
+# Per-host traffic, keyed by aggregation period in seconds
+# (3600, 43200, 86400, 604800, 2592000), then by MAC address.
+stats = client.get_host_traffic_stats()
+hour = stats[3600]
+for mac, counters in hour.items():
+    print(mac, counters["bytes_tx"], counters["bytes_rx"])
+
+# Raw addROD payloads (includes known_device_list, fsam_update, ...).
+raw = client.fetch_bandwidth()
+```
+
+## Command-line interface
+
+Installing the package provides a `vzrouter` command. Connection options fall
+back to the same `VZ_ROUTER_*` environment variables / `.env` file, and can be
+overridden with flags (`--base-url`, `--username`, `--password`,
+`--verify-tls`, `--tls-hostname`, `--timeout`). Structured output is JSON.
+
+```bash
+# Status: uptime, WAN IPs, WAN DNS servers
+vzrouter status
+
+# Known devices (summary; --full for all fields)
+vzrouter devices --active
+
+# Bandwidth
+vzrouter bandwidth history
+vzrouter bandwidth hosts --period 3600
+
+# Local DNS entries
+vzrouter dns list
+vzrouter dns add nas 192.168.1.10
+vzrouter dns remove nas
+vzrouter dns remove 192.168.1.10 --by-ip --all
+
+# Port forwarding
+vzrouter forward list
+vzrouter forward add --name ssh --private-ip 192.168.1.20 \
+  --forward-port 22 --dest-port 22
+vzrouter forward remove 12345
+```
+
 ## TLS notes
 
 By default the client uses the bundled Verizon Fios root CA (`cert/Verizon Fios Root CA.pem`)
@@ -115,8 +200,8 @@ If your router uses different TLS settings, override `verify_tls` or `tls_hostna
 
 ## Development
 
-- Python: 3.9+
-- Runtime dependency: `requests`
+- Python: 3.10+
+- Runtime dependencies: `requests`, `pydantic-settings`, `click`
 
 ## Kubernetes Operator
 
