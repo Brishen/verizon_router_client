@@ -5,10 +5,10 @@
 replicaCount: 1
 
 image:
-  repository: verizon-router-operator
+  repository: ghcr.io/brishen/verizon-router-operator
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
+  tag: "v0.1.1"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -42,7 +42,7 @@ securityContext: {}
 
 router:
   # URL of the Verizon Fios Router
-  baseUrl: "https://192.168.1.1"
+  baseUrl: "https://192.168.1.1:10443"
   # Username to login to the router
   username: "admin"
   # Password to login to the router

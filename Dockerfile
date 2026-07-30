@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM docker.io/library/python:3.11-slim
 
 WORKDIR /app
 
@@ -15,4 +15,4 @@ COPY src/ ./src/
 RUN pip install --no-cache-dir -e ".[operator]"
 
 # Run the kopf operator
-CMD ["kopf", "run", "src/verizon_router_client/operator.py"]
+CMD ["kopf", "run", "-m", "verizon_router_client.operator"]
