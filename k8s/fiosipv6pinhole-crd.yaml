@@ -1,0 +1,42 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: fiosipv6pinholes.network.verizon.com
+spec:
+  group: network.verizon.com
+  names:
+    kind: FiosIpv6Pinhole
+    plural: fiosipv6pinholes
+    shortNames:
+    - fip6
+    singular: fiosipv6pinhole
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              dest_port:
+                anyOf:
+                - type: integer
+                - type: string
+              private_ip:
+                type: string
+              protocol:
+                default: both
+                enum:
+                - tcp
+                - udp
+                - both
+                type: string
+            required:
+            - private_ip
+            - dest_port
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

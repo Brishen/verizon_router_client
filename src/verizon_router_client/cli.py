@@ -233,9 +233,51 @@ def forward_remove(ctx: click.Context, rule_id: str) -> None:
     click.echo(f"Removed rule id {rule_id}")
 
 
+
+
+@cli.command()
+@click.pass_context
+def pinholes(ctx: click.Context) -> None:
+    """List IPv6 pinholes."""
+    client = _client(ctx)
+    _echo_json(client.get_pinhole_settings())
+
+
+@cli.command()
+@click.option("--private-ip", required=True, help="Internal IP address (IPv6).")
+@click.option("--dest-port", required=True, help="Internal destination port.")
+@click.option("--protocol", default="both", type=click.Choice(["tcp", "udp", "both"]))
+@click.option("--disabled", is_flag=True, help="Create rule in disabled state.")
+@click.pass_context
+def add_pinhole(
+    ctx: click.Context,
+    private_ip: str,
+    dest_port: str,
+    protocol: str,
+    disabled: bool,
+) -> None:
+    """Add an IPv6 pinhole rule."""
+    client = _client(ctx)
+    rule_id = client.add_ipv6_pinhole(
+        private_ip=private_ip,
+        dest_port=dest_port,
+        protocol=protocol,
+        enable=not disabled,
+    )
+    click.echo(f"Added pinhole rule {rule_id}")
+
+
+@cli.command()
+@click.argument("rule_id", type=str)
+@click.pass_context
+def remove_pinhole(ctx: click.Context, rule_id: str) -> None:
+    """Remove an IPv6 pinhole rule."""
+    client = _client(ctx)
+    client.remove_ipv6_pinhole(rule_id=rule_id)
+    click.echo(f"Removed pinhole rule {rule_id}")
+
 def main() -> None:
     cli()
-
 
 if __name__ == "__main__":
     main()

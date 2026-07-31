@@ -335,6 +335,45 @@ class VerizonRouterClient:
             )
         return rod
 
+
+    def fetch_pinholes(self) -> dict[str, Any]:
+        """
+        GET /cgi/cgi_firewall_pinholes.js and parse addROD(...) payloads.
+        """
+        text = self._get("/cgi/cgi_firewall_pinholes.js").text
+        rod = self._parse_addrod(text)
+        if not rod:
+            raise RuntimeError(
+                "No addROD() entries found in /cgi/cgi_firewall_pinholes.js"
+            )
+        return rod
+
+    def get_pinhole_settings(self) -> dict[str, Any]:
+        """
+        Returns a normalized view of the pinholes payload, with null entries removed.
+        """
+        rod = self.fetch_pinholes()
+
+        pinholes = rod.get("pinholes")
+        if not isinstance(pinholes, dict):
+            raise RuntimeError(
+                f"Unexpected pinholes payload: {type(pinholes)}"
+            )
+        entries = pinholes.get("pinholes")
+        if not isinstance(entries, list):
+            raise RuntimeError(
+                f"Unexpected pinholes list: {type(entries)}"
+            )
+
+        # Remove null entries (firmware may send [null, null, ...])
+        entries = [e for e in entries if e is not None]
+
+        return {
+            "pinholes": entries,
+            "portrules": rod.get("portrules", {}).get("portrules", []),
+            "schedulerules": rod.get("schedulerules", {}).get("schedulerules", []),
+        }
+
     def get_port_forwarding_settings(self) -> dict[str, Any]:
         """
         Returns a normalized view of the port forwarding payload, with null entries removed.
@@ -546,6 +585,92 @@ class VerizonRouterClient:
                 f"Port forward created but rule id not found. Response: {response!r}"
             )
         return rule_id
+
+
+    def add_ipv6_pinhole(
+        self,
+        *,
+        private_ip: str,
+        dest_port: int | str,
+        protocol: str = "both",
+        enable: bool = True,
+        public_ip: str = "-1",
+        public_domain: str = "",
+        schedule_rule_id: int | str = 0,
+        source_type: int = 0,
+        source_port: str = "",
+        dest_type: int = 1,
+        token: str | None = None,
+    ) -> int:
+        """
+        Create an IPv6 pinhole rule via /db.cgi and return the new rule id.
+        """
+        protocol = protocol.lower()
+        if protocol == "tcp":
+            port_type = 6
+        elif protocol == "udp":
+            port_type = 17
+        elif protocol == "both":
+            port_type = 8
+        else:
+            raise ValueError(f"Unsupported protocol: {protocol}")
+
+        payload = {
+            "type": "edit",
+            "to": "pinholerule",
+            "body": [
+                {
+                    "type": "create",
+                    "enable": "1" if enable else "0",
+                    "publicIP": public_ip,
+                    "publicDomain": public_domain,
+                    "privateIP": private_ip,
+                    "schedule_rule_id": str(schedule_rule_id),
+                    "ports": [
+                        {
+                            "type": port_type,
+                            "source_type": source_type,
+                            "source_port": source_port,
+                            "dest_type": dest_type,
+                            "dest_port": str(dest_port),
+                        }
+                    ],
+                }
+            ],
+        }
+        response = self._post_db(payload, token=token)
+
+        rule_id = self._extract_rule_id_from_response(response)
+
+        if rule_id is None:
+            # Fallback for now if _extract_rule_id_from_response fails
+            try:
+                if isinstance(response, str):
+                    import json
+                    r_json = json.loads(response)
+                    if isinstance(r_json, dict) and "id" in r_json:
+                        return int(r_json["id"])
+            except Exception:
+                pass
+            raise RuntimeError(f"Could not determine rule ID from response: {response}")
+
+        return rule_id
+
+    def remove_ipv6_pinhole(
+        self,
+        *,
+        rule_id: int | str,
+        token: str | None = None,
+    ) -> Any:
+        """
+        Remove an IPv6 pinhole rule via /db.cgi.
+        """
+        payload = {
+            "type": "edit",
+            "to": "pinholerule",
+            "body": [{"type": "delete", "id": str(rule_id)}],
+        }
+        return self._post_db(payload, token=token)
 
     def remove_port_forward(
         self,

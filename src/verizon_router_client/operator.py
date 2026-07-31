@@ -165,3 +165,99 @@ def port_forward_delete(spec, name, logger, **kwargs):
 
     if not removed:
         logger.info(f"No existing Port Forwarding rules found for '{rule_name}'")
+
+
+# --- FiosIpv6Pinhole Handlers ---
+
+@kopf.on.create("network.verizon.com", "v1alpha1", "fiosipv6pinholes")
+@kopf.on.update("network.verizon.com", "v1alpha1", "fiosipv6pinholes")
+def ipv6_pinhole_upsert(spec, name, logger, **kwargs):
+    """Create or update an IPv6 Pinhole rule on the router."""
+    private_ip = spec.get("private_ip")
+    dest_port = spec.get("dest_port")
+    protocol = spec.get("protocol", "both").lower()
+
+    if protocol not in ("tcp", "udp", "both"):
+        raise kopf.PermanentError(f"Invalid protocol: {protocol}")
+
+    if not private_ip or not dest_port:
+        raise kopf.PermanentError(f"Missing required fields (private_ip, dest_port) for {name}")
+
+    client = get_client()
+
+    logger.info(f"Upserting IPv6 Pinhole rule: {private_ip}:{dest_port} ({protocol.upper()})")
+
+    # To handle updates cleanly, remove existing rule if it matches
+    settings = client.get_pinhole_settings()
+    entries = settings.get("pinholes", [])
+
+    token = client.get_apply_token()
+
+    # Translate protocol to type for matching
+    type_map = {"tcp": 6, "udp": 17, "both": 8}
+    target_type = type_map[protocol]
+
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("privateIP") == private_ip:
+            ports = entry.get("ports", [])
+            for p in ports:
+                if isinstance(p, dict) and str(p.get("dest_port")) == str(dest_port) and p.get("type") == target_type:
+                    entry_id = entry.get("id")
+                    if entry_id is not None:
+                        logger.info(f"Removing existing IPv6 Pinhole rule with ID {entry_id}")
+                        client.remove_ipv6_pinhole(rule_id=entry_id, token=token)
+                        break
+
+    # Add the new rule
+    try:
+        rule_id = client.add_ipv6_pinhole(
+            private_ip=private_ip,
+            dest_port=dest_port,
+            protocol=protocol,
+            token=token
+        )
+        logger.info(f"Added IPv6 Pinhole rule with ID {rule_id}")
+        return {"status": "upserted", "rule_id": rule_id, "private_ip": private_ip, "dest_port": dest_port}
+    except Exception as e:
+        logger.error(f"Failed to add IPv6 Pinhole rule: {e}")
+        raise kopf.TemporaryError(f"Failed to add IPv6 Pinhole rule: {e}", delay=30)
+
+
+@kopf.on.delete("network.verizon.com", "v1alpha1", "fiosipv6pinholes")
+def ipv6_pinhole_delete(spec, name, logger, **kwargs):
+    """Delete an IPv6 Pinhole rule from the router."""
+    private_ip = spec.get("private_ip")
+    dest_port = spec.get("dest_port")
+    protocol = spec.get("protocol", "both").lower()
+
+    if not private_ip or not dest_port:
+        logger.warning(f"Missing required fields (private_ip, dest_port) in {name} spec. Skipping deletion.")
+        return
+
+    client = get_client()
+
+    logger.info(f"Deleting IPv6 Pinhole rule: {private_ip}:{dest_port} ({protocol.upper()})")
+
+    settings = client.get_pinhole_settings()
+    entries = settings.get("pinholes", [])
+
+    token = client.get_apply_token()
+
+    type_map = {"tcp": 6, "udp": 17, "both": 8}
+    target_type = type_map[protocol]
+
+    removed = False
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("privateIP") == private_ip:
+            ports = entry.get("ports", [])
+            for p in ports:
+                if isinstance(p, dict) and str(p.get("dest_port")) == str(dest_port) and p.get("type") == target_type:
+                    entry_id = entry.get("id")
+                    if entry_id is not None:
+                        logger.info(f"Removing IPv6 Pinhole rule with ID {entry_id}")
+                        client.remove_ipv6_pinhole(rule_id=entry_id, token=token)
+                        removed = True
+                    break
+
+    if not removed:
+        logger.info(f"No existing IPv6 Pinhole rules found for {private_ip}:{dest_port}")
