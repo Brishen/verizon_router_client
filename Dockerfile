@@ -16,3 +16,7 @@ RUN pip install --no-cache-dir -e ".[operator]"
 
 # Run the kopf operator
 CMD ["kopf", "run", "-m", "verizon_router_client.operator"]
+
+LABEL org.opencontainers.image.source=https://github.com/Brishen/verizon_router_client
+LABEL org.opencontainers.image.description="Verizon Router Operator"
+LABEL org.opencontainers.image.licenses=MIT
