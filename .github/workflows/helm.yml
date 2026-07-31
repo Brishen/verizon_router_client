@@ -1,0 +1,38 @@
+name: Publish Helm Chart
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish-helm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} --username ${{ github.actor }} --password-stdin
+
+      - name: Package Helm chart
+        run: helm package charts/verizon-router-operator
+
+      - name: Push Helm chart
+        run: |
+          CHART_PACKAGE=$(ls verizon-router-operator-*.tgz)
+          helm push $CHART_PACKAGE oci://${{ env.REGISTRY }}/${{ github.repository_owner }}
