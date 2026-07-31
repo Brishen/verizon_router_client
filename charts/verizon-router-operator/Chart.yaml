@@ -22,3 +22,7 @@ version: 0.3.0
 # follow Semantic Versioning. They should reflect the version the application is using.
 # It is recommended to use it with quotes.
 appVersion: "latest"
+
+annotations:
+  artifacthub.io/license: MIT
+  org.opencontainers.image.source: "https://github.com/Brishen/verizon_router_client"
