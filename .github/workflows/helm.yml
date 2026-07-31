@@ -35,4 +35,5 @@ jobs:
       - name: Push Helm chart
         run: |
           CHART_PACKAGE=$(ls verizon-router-operator-*.tgz)
-          helm push $CHART_PACKAGE oci://${{ env.REGISTRY }}/${{ github.repository_owner }}
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm push $CHART_PACKAGE oci://${{ env.REGISTRY }}/$REPO_OWNER
