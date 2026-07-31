@@ -487,9 +487,9 @@ class VerizonRouterClient:
         private_ip: str,
         forward_port: int | str,
         dest_port: int | str,
+        protocol: str = "both",
         enable: bool = True,
         schedule_rule_id: int | str = 0,
-        port_type: int = 8,
         source_type: int = 0,
         source_port: str = "",
         dest_type: int = 1,
@@ -498,6 +498,16 @@ class VerizonRouterClient:
         """
         Create a port forwarding rule via /db.cgi and return the new rule id.
         """
+        protocol = protocol.lower()
+        if protocol == "tcp":
+            port_type = 6
+        elif protocol == "udp":
+            port_type = 17
+        elif protocol == "both":
+            port_type = 8
+        else:
+            raise ValueError(f"Unsupported protocol: {protocol}")
+
         payload = {
             "type": "edit",
             "to": "forwardrule",
