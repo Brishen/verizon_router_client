@@ -92,13 +92,17 @@ def port_forward_upsert(spec, name, logger, **kwargs):
     private_ip = spec.get("private_ip")
     forward_port = spec.get("forward_port")
     dest_port = spec.get("dest_port")
+    protocol = spec.get("protocol", "both").lower()
+
+    if protocol not in ("tcp", "udp", "both"):
+        raise kopf.PermanentError(f"Invalid protocol: {protocol}")
 
     if not rule_name or not private_ip or not forward_port or not dest_port:
         raise kopf.PermanentError(f"Missing required fields (name, private_ip, forward_port, dest_port) for {name}")
 
     client = get_client()
 
-    logger.info(f"Upserting Port Forwarding rule: {rule_name} ({forward_port} -> {private_ip}:{dest_port})")
+    logger.info(f"Upserting Port Forwarding rule: {rule_name} ({protocol.upper()} {forward_port} -> {private_ip}:{dest_port})")
 
     # To handle updates cleanly, remove existing rule if it matches by name
     # The router allows multiple rules with the same name, so we find and delete them
@@ -122,6 +126,7 @@ def port_forward_upsert(spec, name, logger, **kwargs):
             private_ip=private_ip,
             forward_port=forward_port,
             dest_port=dest_port,
+            protocol=protocol,
             token=token
         )
         logger.info(f"Added Port Forwarding rule '{rule_name}' with ID {rule_id}")

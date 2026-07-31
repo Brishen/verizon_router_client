@@ -198,6 +198,7 @@ def forward_list(ctx: click.Context) -> None:
 @click.option("--private-ip", required=True, help="LAN IP to forward to.")
 @click.option("--forward-port", required=True, help="External port.")
 @click.option("--dest-port", required=True, help="Internal destination port.")
+@click.option("--protocol", default="both", type=click.Choice(["tcp", "udp", "both"], case_sensitive=False), help="Protocol (tcp, udp, both).")
 @click.option("--disabled", is_flag=True, help="Create the rule disabled.")
 @click.pass_context
 def forward_add(
@@ -206,6 +207,7 @@ def forward_add(
     private_ip: str,
     forward_port: str,
     dest_port: str,
+    protocol: str,
     disabled: bool,
 ) -> None:
     """Add a port forwarding rule."""
@@ -215,6 +217,7 @@ def forward_add(
         private_ip=private_ip,
         forward_port=forward_port,
         dest_port=dest_port,
+        protocol=protocol,
         enable=not disabled,
     )
     click.echo(f"Created rule id {rule_id}")

@@ -32,6 +32,11 @@ spec:
                 dest_port:
                   type: integer
                   description: The destination port to forward to (internal port)
+                protocol:
+                  type: string
+                  description: The protocol to forward (tcp, udp, both)
+                  enum: [tcp, udp, both, TCP, UDP, Both]
+                  default: both
       additionalPrinterColumns:
       - name: Rule Name
         type: string
@@ -49,6 +54,10 @@ spec:
         type: integer
         description: The internal destination port
         jsonPath: .spec.dest_port
+      - name: Protocol
+        type: string
+        description: The protocol
+        jsonPath: .spec.protocol
   scope: Namespaced
   names:
     plural: fiosportforwards
