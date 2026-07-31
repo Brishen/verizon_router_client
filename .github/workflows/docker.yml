@@ -3,7 +3,7 @@ name: Build and Publish Container Image
 on:
   push:
     branches:
-      - main
+      - master
     tags:
       - 'v*'
 
@@ -35,7 +35,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'master') }}
             type=semver,pattern={{version}}
 
       - name: Set up Docker Buildx
